@@ -1,0 +1,12 @@
+# 浏览器登录态（包含你的个人 Cookie）
+browser_data/
+
+# 输出结果文件
+output/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 调试截图
+debug_*.png
