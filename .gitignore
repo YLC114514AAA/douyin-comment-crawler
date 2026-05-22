@@ -10,3 +10,7 @@ __pycache__/
 
 # 调试截图
 debug_*.png
+
+# 便携 Node.js 运行时
+node.exe
+node-tmp.zip

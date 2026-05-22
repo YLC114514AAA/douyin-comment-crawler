@@ -22,29 +22,41 @@ def _format_time(timestamp: int) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
+def _make_searchable(c: dict) -> set:
+    """构造评论的搜索标识集合（小写）"""
+    return {
+        str(c.get("unique_id") or "").lower(),
+        str(c.get("uid") or "").lower(),
+        str(c.get("short_id") or "").lower(),
+        str(c.get("nickname") or "").lower(),
+    }
+
+
 def filter_by_douyin_id(comments: list[dict], targets: list[str]) -> list[dict]:
     """
-    按抖音号/UID/昵称筛选评论。按以下优先级匹配：
-      1. unique_id（抖音号，如 @zhangsan）
-      2. uid（数字ID）
-      3. short_id（短ID）
-      4. nickname（昵称）
-    大小写不敏感。
+    按抖音号/UID/昵称筛选评论。大小写不敏感。
+    匹配一级评论作者 以及 二级回复作者。
     """
     if not targets:
         return comments
 
     target_set = {t.strip().lower() for t in targets if t.strip()}
     results = []
+
     for c in comments:
-        searchable = {
-            (c.get("unique_id") or "").lower(),
-            (c.get("uid") or "").lower(),
-            (c.get("short_id") or "").lower(),
-            (c.get("nickname") or "").lower(),
-        }
-        if searchable & target_set:
+        matched = bool(_make_searchable(c) & target_set)
+
+        # 也检查二级回复中是否有目标用户
+        replies = c.get("replies") or []
+        matched_replies = [r for r in replies if _make_searchable(r) & target_set]
+
+        if matched:
             results.append(c)
+        elif matched_replies:
+            c_copy = dict(c)
+            c_copy["replies"] = matched_replies
+            results.append(c_copy)
+
     return results
 
 
@@ -71,18 +83,29 @@ def group_by_user(comments: list[dict]) -> dict[str, list[dict]]:
     return groups
 
 
+def _flatten_all(comments: list[dict]) -> list[dict]:
+    """将含 replies 的评论展平为全部评论列表（含二级回复）"""
+    all_items = []
+    for c in comments:
+        all_items.append(c)
+        for r in c.get("replies") or []:
+            all_items.append(r)
+    return all_items
+
+
 def compute_stats(comments: list[dict]) -> dict:
-    """计算统计汇总"""
-    if not comments:
+    """计算统计汇总（含二级回复）"""
+    all_items = _flatten_all(comments)
+    if not all_items:
         return {"total_comments": 0, "total_likes": 0, "avg_likes": 0, "max_comment": None}
 
-    total_likes = sum(c.get("digg_count", 0) for c in comments)
-    max_comment = max(comments, key=lambda c: c.get("digg_count", 0))
+    total_likes = sum(c.get("digg_count", 0) for c in all_items)
+    max_comment = max(all_items, key=lambda c: c.get("digg_count", 0))
 
     return {
-        "total_comments": len(comments),
+        "total_comments": len(all_items),
         "total_likes": total_likes,
-        "avg_likes": round(total_likes / len(comments), 1),
+        "avg_likes": round(total_likes / len(all_items), 1) if all_items else 0,
         "max_comment": max_comment,
     }
 
@@ -161,6 +184,30 @@ def save_text_report(
 
             if c.get("reply_comment_total", 0) > 0:
                 lines.append(f"  二级回复数: {c['reply_comment_total']}")
+
+            replies = c.get("replies") or []
+            if replies:
+                lines.append(f"  ---- 二级回复 ({len(replies)}条) ----")
+                for ri, r in enumerate(replies, 1):
+                    r_likes = r.get("digg_count", 0)
+                    r_time = _format_time(r.get("create_time", 0))
+                    r_ip = r.get("ip_label", "-")
+                    r_user = r.get("nickname", "未知")
+                    r_text = r.get("text", "")
+                    lines.append(f"    回复 #{ri} | 用户: {r_user} | 点赞: {r_likes} | 时间: {r_time} | IP: {r_ip}")
+                    lines.append(f"    内容: {r_text}")
+                    r_images = r.get("images", [])
+                    if r_images:
+                        lines.append(f"    图片: [{len(r_images)}张]")
+                        for img_url in r_images:
+                            lines.append(f"      - {img_url}")
+                    r_stickers = r.get("stickers", [])
+                    if r_stickers:
+                        lines.append(f"    贴纸: [{len(r_stickers)}个]")
+                        for s_url in r_stickers:
+                            lines.append(f"      - {s_url}")
+                    lines.append("")
+                lines.append("  ---- 二级回复结束 ----")
 
             lines.append("")
 

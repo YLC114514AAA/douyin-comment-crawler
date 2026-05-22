@@ -5,11 +5,15 @@
   2. 直接从页面 DOM 提取（兜底，只含昵称和可见内容）
 """
 
+import json
 import re
 import time
+
+import httpx
 from playwright.sync_api import sync_playwright
 
 import config
+from sign import build_request_params, get_webid, COMMON_HEADERS
 
 
 class DouyinCommentCrawler:
@@ -114,7 +118,18 @@ class DouyinCommentCrawler:
             # 从 DOM 读取作为兜底
             dom_comments = self._extract_from_dom(page)
 
-            print(f"[信息] API拦截: {len(api_collected)} 条, DOM读取: {len(dom_comments)} 条")
+            # 抓取二级回复（httpx + execjs 签名）
+            try:
+                replies_map = self._collect_replies(page, aweme_id, api_collected)
+                for cid, replies in replies_map.items():
+                    if cid in api_collected:
+                        api_collected[cid]["replies"] = replies
+                total_replies = sum(len(r) for r in replies_map.values())
+            except Exception as e:
+                print(f"[警告] 二级回复抓取出错: {e}")
+                total_replies = 0
+
+            print(f"[信息] API拦截: {len(api_collected)} 条一级评论, {total_replies} 条二级回复, DOM: {len(dom_comments)} 条")
             return video_url, list(api_collected.values()), dom_comments
 
         finally:
@@ -214,7 +229,8 @@ class DouyinCommentCrawler:
 
             total = len(api_collected)
             if total > last_total:
-                print(f"[进度] API拦截: {total} 条评论...")
+                reply_sum = sum(c.get("reply_comment_total", 0) for c in api_collected.values())
+                print(f"[进度] 一级评论: {total} 条 (含 {reply_sum} 条二级回复)")
                 last_total = total
                 no_new = 0
             else:
@@ -322,6 +338,101 @@ class DouyinCommentCrawler:
         except Exception as e:
             print(f"[警告] DOM提取失败: {e}")
             return []
+
+    def _fetch_replies_via_api(self, aweme_id: str, parent_comment: dict,
+                                 cookie_str: str, cookie_dict: dict, webid: str | None) -> list[dict]:
+        """通过 httpx + execjs 签名直接调用回复 API（仿 DouyinComments）"""
+        cid = parent_comment["cid"]
+        all_replies = []
+        cursor = 0
+
+        while True:
+            params = {
+                "comment_id": cid,
+                "item_id": aweme_id,
+                "cursor": str(cursor),
+                "count": "20",
+                "item_type": "0",
+            }
+            if webid:
+                params["webid"] = webid
+
+            full_params = build_request_params(
+                "/aweme/v1/web/comment/list/reply/",
+                params,
+                cookie_dict,
+            )
+
+            headers = dict(COMMON_HEADERS)
+            headers["Cookie"] = cookie_str
+            headers["Referer"] = f"https://www.douyin.com/video/{aweme_id}"
+
+            url = "https://www.douyin.com/aweme/v1/web/comment/list/reply/"
+            resp = httpx.get(url, params=full_params, headers=headers, timeout=15)
+            data = resp.json()
+
+            status_code = data.get("status_code", 0)
+            if status_code != 0:
+                print(f"    [API错误] status_code={status_code}, msg={data.get('status_msg', '')}")
+                break
+
+            comments_list = data.get("comments") or []
+            for r in comments_list:
+                reply_data = self._extract_comment_data(r)
+                reply_data["reply_to_comment_id"] = cid
+                reply_data["reply_to_nickname"] = parent_comment.get("nickname", "")
+                all_replies.append(reply_data)
+
+            if not data.get("has_more"):
+                break
+            cursor = data.get("cursor", 0)
+            time.sleep(config.REPLY_REQUEST_INTERVAL)
+
+        return all_replies
+
+    def _collect_replies(self, page, aweme_id: str, api_collected: dict) -> dict:
+        """遍历所有有回复的一级评论，抓取其二级回复"""
+        comments_with_replies = [
+            c for c in api_collected.values()
+            if c.get("reply_comment_total", 0) > 0
+        ]
+
+        if not comments_with_replies:
+            print("[信息] 没有需要抓取的二级回复")
+            return {}
+
+        # 提取浏览器 cookie
+        cookies = page.context.cookies()
+        cookie_dict = {c["name"]: c["value"] for c in cookies}
+        cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+
+        # 获取 webid
+        print("[信息] 获取 webid...")
+        webid = get_webid(cookie_str)
+        if webid:
+            print(f"[信息] webid: {webid}")
+        else:
+            print("[警告] 未能获取 webid，尝试继续...")
+
+        print(f"[信息] 正在抓取 {len(comments_with_replies)} 条评论的二级回复...")
+        replies_map = {}
+
+        for i, comment in enumerate(comments_with_replies):
+            cid = comment["cid"]
+            expected = comment.get("reply_comment_total", 0)
+            print(f"[回复] ({i + 1}/{len(comments_with_replies)}) cid={cid[:16]}...  预期{expected}条")
+
+            try:
+                replies = self._fetch_replies_via_api(
+                    aweme_id, comment, cookie_str, cookie_dict, webid
+                )
+                replies_map[cid] = replies
+                print(f"  -> 实际获取 {len(replies)} 条回复")
+            except Exception as e:
+                print(f"  -> [警告] 获取失败: {e}")
+                replies_map[cid] = []
+
+        return replies_map
 
     def close(self):
         """关闭浏览器资源"""

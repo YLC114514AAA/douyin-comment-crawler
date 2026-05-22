@@ -162,12 +162,18 @@ def main():
     # API拦截到的优先（含抖音号/UID），DOM兜底（只有昵称）
     if api_comments:
         all_comments = api_comments
-        print(f"[信息] 使用API拦截数据: {len(all_comments)} 条（含抖音号/UID）")
+        data_source = "api"
+        total_replies = sum(len(c.get("replies") or []) for c in all_comments)
+        print(f"[信息] 使用API拦截数据: {len(all_comments)} 条一级 + {total_replies} 条二级（含抖音号/UID）")
     elif dom_comments:
         all_comments = dom_comments
+        data_source = "dom"
+        total_replies = 0
         print(f"[信息] API拦截为空，使用DOM提取数据: {len(all_comments)} 条（仅含昵称）")
     else:
         all_comments = []
+        data_source = "none"
+        total_replies = 0
         print("[信息] API拦截和DOM提取均为空，可能评论区未加载")
 
     if not all_comments:
@@ -196,7 +202,7 @@ def main():
         print("=" * 50)
         print("[结果] 未找到指定用户的评论")
         print("=" * 50)
-        print(f"已抓取 {len(all_comments)} 条评论，但没有任何一条匹配到指定目标。")
+        print(f"已抓取 {len(all_comments)} 条一级评论" + (f" + {total_replies} 条二级回复" if total_replies > 0 else "") + "，但没有任何一条匹配到指定目标。")
         print()
         print("可能的原因：")
         print("  1. 抖音号/UID 拼写不正确（大小写不敏感）")
@@ -224,7 +230,8 @@ def main():
         "scraped_at": datetime.now(beijing_tz).isoformat(),
         "queried_targets": target_ids,
         "total_comments_scraped": len(all_comments),
-        "data_source": "api" if api_comments else "dom",
+        "total_replies_scraped": total_replies,
+        "data_source": data_source,
         "matched_comments": filtered,
     }
     save_json(json_data, json_path)
