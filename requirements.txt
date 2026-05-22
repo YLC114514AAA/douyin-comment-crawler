@@ -2,4 +2,5 @@ playwright>=1.40.0
 httpx>=0.25.0
 PyExecJS>=1.5.1
 cookiesparser
-nodejs-bin>=18.0.0
+customtkinter>=5.2.0
+CTkMessagebox>=2.7
