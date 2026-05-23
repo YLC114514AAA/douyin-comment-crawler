@@ -165,6 +165,13 @@ class App(ctk.CTk):
                       font=("Microsoft YaHei UI", 13))
         tb.tag_config("image_url", foreground="#66BB6A",
                       font=("Consolas", 10))
+        tb.tag_config("hl", background="#5A4500")
+        tb.tag_config("tree", foreground="#00CED1",
+                      font=("Microsoft YaHei UI", 12, "bold"))
+        tb.tag_config("level", foreground="#666666",
+                      font=("Microsoft YaHei UI", 10))
+        tb.tag_config("arrow", foreground="#FF8C00",
+                      font=("Microsoft YaHei UI", 11, "bold"))
 
         self.result_box.insert("1.0", "抓取完成后，结果将在此显示。\n\n"
                                "也可以点击下方  打开结果文件夹 查看 JSON / TXT 文件。")
@@ -260,6 +267,10 @@ class App(ctk.CTk):
             "⑯", "⑰", "⑱", "⑲", "⑳",
         ]
 
+        # 标签辅助
+        def _tt(tag, highlight):
+            return (tag, "hl") if highlight else tag
+
         # 给每条目标发言打上序号标记
         item_num = {}
         for i, item in enumerate(all_target_items):
@@ -303,29 +314,33 @@ class App(ctk.CTk):
                 t = _format_time(c["create_time"])
                 ip = c.get("ip_label", "-")
 
-                # 目标用户的评论加圆圈序号
+                is_me = _is_target(c)
                 circle_mark = item_num.get(id(c), "")
 
-                tb.insert("end", f"    ", "body")
-                tb.insert("end", f"❤ {likes}  ", "likes")
-                tb.insert("end", f"{t}  ", "time")
-                tb.insert("end", f"IP: {ip}", "time")
+                tb.insert("end", "    ", _tt("body", is_me))
+                tb.insert("end", f"❤ {likes}  ", _tt("likes", is_me))
+                tb.insert("end", f"{t}  ", _tt("time", is_me))
+                tb.insert("end", f"IP: {ip}", _tt("time", is_me))
+                cb = _tt("h3", is_me)
                 if circle_mark:
-                    tb.insert("end", f"  {circle_mark}", "h3")
+                    tb.insert("end", f"  {circle_mark}", cb)
+                tb.insert("end", "  · 一级评论", _tt("level", is_me))
+                if is_me:
+                    tb.insert("end", "  ◀", "arrow")
                 tb.insert("end", "\n")
-                tb.insert("end", f"        {c['text']}\n", "body")
+                tb.insert("end", f"        {c['text']}\n", _tt("body", is_me))
 
                 images = c.get("images", [])
                 if images:
-                    tb.insert("end", f"        [图] ({len(images)}张)\n", "time")
+                    tb.insert("end", f"        [图] ({len(images)}张)\n", _tt("time", is_me))
                     for img in images:
-                        tb.insert("end", f"          {img}\n", "image_url")
+                        tb.insert("end", f"          {img}\n", _tt("image_url", is_me))
 
                 stickers = c.get("stickers", [])
                 if stickers:
-                    tb.insert("end", f"        [贴纸] ({len(stickers)}个)\n", "time")
+                    tb.insert("end", f"        [贴纸] ({len(stickers)}个)\n", _tt("time", is_me))
                     for s in stickers:
-                        tb.insert("end", f"          {s}\n", "image_url")
+                        tb.insert("end", f"          {s}\n", _tt("image_url", is_me))
 
                 replies = c.get("replies") or []
                 for ri, r in enumerate(replies):
@@ -336,20 +351,28 @@ class App(ctk.CTk):
                     prefix = "  └ " if is_last else "  ├ "
                     indent = "    " if is_last else "  │ "
                     r_circle = item_num.get(id(r), "")
+                    r_is_me = _is_target(r)
+                    tree_tag = ("tree", "hl") if r_is_me else "tree"
 
-                    tb.insert("end", f"\n      {prefix}", "separator")
-                    tb.insert("end", f"{r_user}", "reply_user")
-                    tb.insert("end", f"  ❤ {r_likes}  ", "likes")
-                    tb.insert("end", f"{r_time}", "time")
+                    tb.insert("end", "\n      ")
+                    tb.insert("end", prefix, tree_tag)
+                    tb.insert("end", f"{r_user}", _tt("reply_user", r_is_me))
+                    tb.insert("end", f"  ❤ {r_likes}  ", _tt("likes", r_is_me))
+                    tb.insert("end", f"{r_time}", _tt("time", r_is_me))
                     if r_circle:
-                        tb.insert("end", f"  {r_circle}", "h3")
+                        tb.insert("end", f"  {r_circle}", _tt("h3", r_is_me))
+                    tb.insert("end", "  · 二级评论", _tt("level", r_is_me))
+                    if r_is_me:
+                        tb.insert("end", "  ◀", "arrow")
                     tb.insert("end", "\n")
-                    tb.insert("end", f"      {indent}{r.get('text', '')}\n", "reply_body")
+                    tb.insert("end", "      ")
+                    tb.insert("end", indent, tree_tag)
+                    tb.insert("end", f"{r.get('text', '')}\n", _tt("reply_body", r_is_me))
 
                     r_images = r.get("images", [])
                     if r_images:
                         for img in r_images:
-                            tb.insert("end", f"      {indent}[图] {img}\n", "image_url")
+                            tb.insert("end", f"      {indent}[图] {img}\n", _tt("image_url", r_is_me))
 
                 tb.insert("end", "\n")
 
