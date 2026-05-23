@@ -269,6 +269,8 @@ class DouyinCommentCrawler:
             "create_time": c.get("create_time", 0),
             "ip_label": c.get("ip_label", ""),
             "reply_comment_total": c.get("reply_comment_total", 0),
+            "reply_id": str(c.get("reply_id", "")),
+            "reply_to_reply_id": str(c.get("reply_to_reply_id", "0")),
             "nickname": user.get("nickname", ""),
             "uid": user.get("uid", ""),
             "unique_id": user.get("unique_id", ""),
@@ -341,7 +343,7 @@ class DouyinCommentCrawler:
 
     def _fetch_replies_via_api(self, aweme_id: str, parent_comment: dict,
                                  cookie_str: str, cookie_dict: dict, webid: str | None) -> list[dict]:
-        """通过 httpx + execjs 签名直接调用回复 API（仿 DouyinComments）"""
+        """通过 httpx + execjs 签名调用回复 API，用 reply_to_reply_id 搭嵌套树"""
         cid = parent_comment["cid"]
         all_replies = []
         cursor = 0
@@ -388,7 +390,22 @@ class DouyinCommentCrawler:
             cursor = data.get("cursor", 0)
             time.sleep(config.REPLY_REQUEST_INTERVAL)
 
-        return all_replies
+        # 用 reply_to_reply_id 搭嵌套树
+        # reply_to_reply_id == "0" → 直接回复一级评论
+        # reply_to_reply_id != "0" → 回复某条二级回复
+        reply_lookup = {r["cid"]: r for r in all_replies}
+        tree = []
+        for r in all_replies:
+            parent_cid = r.get("reply_to_reply_id", "0")
+            if parent_cid != "0" and parent_cid in reply_lookup:
+                parent = reply_lookup[parent_cid]
+                if "replies" not in parent:
+                    parent["replies"] = []
+                parent["replies"].append(r)
+            else:
+                tree.append(r)
+
+        return tree
 
     def _collect_replies(self, page, aweme_id: str, api_collected: dict) -> dict:
         """遍历所有有回复的一级评论，抓取其二级回复"""

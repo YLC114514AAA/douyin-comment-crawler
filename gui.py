@@ -249,14 +249,15 @@ class App(ctk.CTk):
                 str(c.get("nickname") or "").lower(),
             } & target_set)
 
-        # 收集目标用户所有发言（一级+二级），按时间排序编号
+        # 收集目标用户所有发言（含深层回复），按时间排序编号
         all_target_items = []
+        def _collect_target(item):
+            if _is_target(item):
+                all_target_items.append(item)
+            for sub in item.get("replies") or []:
+                _collect_target(sub)
         for c in filtered:
-            if _is_target(c):
-                all_target_items.append(c)
-            for r in c.get("replies") or []:
-                if _is_target(r):
-                    all_target_items.append(r)
+            _collect_target(c)
         all_target_items.sort(key=lambda x: x.get("create_time", 0))
 
         # 圆圈数字 ①-⑳ = ①-⑳
@@ -342,37 +343,52 @@ class App(ctk.CTk):
                     for s in stickers:
                         tb.insert("end", f"          {s}\n", _tt("image_url", is_me))
 
+                # 递归渲染回复（含深层嵌套）
+                _level_label = ["", "二级评论", "二级评论", "二级评论"]
+
+                def _render_replies(replies, depth, base_indent):
+                    for ri, r in enumerate(replies):
+                        is_last = ri == len(replies) - 1
+                        r_user = r.get("nickname", "???")
+                        r_likes = r.get("digg_count", 0)
+                        r_time = _format_time(r.get("create_time", 0))
+                        r_circle = item_num.get(id(r), "")
+                        r_is_me = _is_target(r)
+                        tree_tag = ("tree", "hl") if r_is_me else "tree"
+                        level_name = _level_label[min(depth, 3)]
+                        indent_pad = "    "
+
+                        prefix = indent_pad + ("  └ " if is_last else "  ├ ")
+                        cont_prefix = indent_pad + ("    " if is_last else "  │ ")
+
+                        tb.insert("end", f"\n      {base_indent}")
+                        tb.insert("end", prefix, tree_tag)
+                        tb.insert("end", f"{r_user}", _tt("reply_user", r_is_me))
+                        tb.insert("end", f"  ❤ {r_likes}  ", _tt("likes", r_is_me))
+                        tb.insert("end", f"{r_time}", _tt("time", r_is_me))
+                        if r_circle:
+                            tb.insert("end", f"  {r_circle}", _tt("h3", r_is_me))
+                        if level_name:
+                            tb.insert("end", f"  · {level_name}", _tt("level", r_is_me))
+                        if r_is_me:
+                            tb.insert("end", "  ◀", "arrow")
+                        tb.insert("end", "\n")
+                        tb.insert("end", f"      {base_indent}")
+                        tb.insert("end", cont_prefix, tree_tag)
+                        tb.insert("end", f"{r.get('text', '')}\n", _tt("reply_body", r_is_me))
+
+                        r_images = r.get("images", [])
+                        if r_images:
+                            for img in r_images:
+                                tb.insert("end", f"      {base_indent}{cont_prefix}[图] {img}\n", _tt("image_url", r_is_me))
+
+                        # 递归渲染更深层回复
+                        sub_replies = r.get("replies") or []
+                        if sub_replies:
+                            _render_replies(sub_replies, depth + 1, base_indent + cont_prefix)
+
                 replies = c.get("replies") or []
-                for ri, r in enumerate(replies):
-                    is_last = ri == len(replies) - 1
-                    r_user = r.get("nickname", "???")
-                    r_likes = r.get("digg_count", 0)
-                    r_time = _format_time(r.get("create_time", 0))
-                    prefix = "  └ " if is_last else "  ├ "
-                    indent = "    " if is_last else "  │ "
-                    r_circle = item_num.get(id(r), "")
-                    r_is_me = _is_target(r)
-                    tree_tag = ("tree", "hl") if r_is_me else "tree"
-
-                    tb.insert("end", "\n      ")
-                    tb.insert("end", prefix, tree_tag)
-                    tb.insert("end", f"{r_user}", _tt("reply_user", r_is_me))
-                    tb.insert("end", f"  ❤ {r_likes}  ", _tt("likes", r_is_me))
-                    tb.insert("end", f"{r_time}", _tt("time", r_is_me))
-                    if r_circle:
-                        tb.insert("end", f"  {r_circle}", _tt("h3", r_is_me))
-                    tb.insert("end", "  · 二级评论", _tt("level", r_is_me))
-                    if r_is_me:
-                        tb.insert("end", "  ◀", "arrow")
-                    tb.insert("end", "\n")
-                    tb.insert("end", "      ")
-                    tb.insert("end", indent, tree_tag)
-                    tb.insert("end", f"{r.get('text', '')}\n", _tt("reply_body", r_is_me))
-
-                    r_images = r.get("images", [])
-                    if r_images:
-                        for img in r_images:
-                            tb.insert("end", f"      {indent}[图] {img}\n", _tt("image_url", r_is_me))
+                _render_replies(replies, 1, "")
 
                 tb.insert("end", "\n")
 
