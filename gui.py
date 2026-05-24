@@ -8,8 +8,10 @@ import os
 import sys
 import threading
 import traceback
+import webbrowser
 
 import customtkinter as ctk
+import httpx
 from CTkMessagebox import CTkMessagebox
 
 from crawler import DouyinCommentCrawler
@@ -53,6 +55,8 @@ class App(ctk.CTk):
 
         self.crawler = None
         self.is_running = False
+        self._img_store = {}
+        self._img_counter = 0
 
         self._build_ui()
         sys.stdout = PrintRedirector(self._log)
@@ -277,9 +281,11 @@ class App(ctk.CTk):
         for i, item in enumerate(all_target_items):
             item_num[id(item)] = CIRCLE[i] if i < len(CIRCLE) else f"({i + 1})"
 
-        # 目标总赞数
+        # 目标统计
         target_total_likes = sum(it.get("digg_count", 0) for it in all_target_items)
         target_total_count = len(all_target_items)
+        target_primary = sum(1 for c in filtered if _is_target(c))
+        target_secondary = target_total_count - target_primary
 
         groups = group_by_user(filtered)
 
@@ -294,8 +300,9 @@ class App(ctk.CTk):
         tb.insert("end", f"{now}\n", "time")
         tb.insert("end", "  查询  ", "summary")
         tb.insert("end", f"{', '.join(target_ids[:4])}{'...' if len(target_ids) > 4 else ''}\n", "body")
-        tb.insert("end", "  点赞  ", "summary")
-        tb.insert("end", f"共 {target_total_likes}\n", "likes")
+        tb.insert("end", f"  一级评论 {target_primary} 条  ·  二级回复 {target_secondary} 条\n", "stat")
+        tb.insert("end", "  目标用户评论总点赞数  ", "summary")
+        tb.insert("end", f"{target_total_likes}\n", "likes")
         tb.insert("end", "  " + "─" * 48 + "\n\n", "separator")
 
         # ── 每个用户
@@ -332,18 +339,20 @@ class App(ctk.CTk):
                 tb.insert("end", f"        {c['text']}\n", _tt("body", is_me))
 
                 images = c.get("images", [])
-                if images:
-                    tb.insert("end", f"        [图] ({len(images)}张)\n", _tt("time", is_me))
-                    for img in images:
-                        tb.insert("end", f"          {img}\n", _tt("image_url", is_me))
-
                 stickers = c.get("stickers", [])
-                if stickers:
-                    tb.insert("end", f"        [贴纸] ({len(stickers)}个)\n", _tt("time", is_me))
-                    for s in stickers:
-                        tb.insert("end", f"          {s}\n", _tt("image_url", is_me))
+                all_media = images + stickers
+                if all_media:
+                    idx = self._img_counter
+                    self._img_counter += 1
+                    self._img_store[idx] = all_media
+                    tag = f"img_{idx}"
+                    tb.tag_config(tag, foreground="#4FC3F7",
+                                  font=("Microsoft YaHei UI", 10, "underline"))
+                    tb.tag_bind(tag, "<Button-1>",
+                                lambda e, i=idx: self._open_image_viewer(i))
+                    tb.insert("end", f"        [查看图片 ({len(all_media)}张)]\n", _tt(tag, is_me))
 
-                # 递归渲染回复（含深层嵌套）
+                # 递归渲染回复 — 文件树风格
                 _level_label = ["", "二级评论", "二级评论", "二级评论"]
 
                 def _render_replies(replies, depth, base_indent):
@@ -356,13 +365,13 @@ class App(ctk.CTk):
                         r_is_me = _is_target(r)
                         tree_tag = ("tree", "hl") if r_is_me else "tree"
                         level_name = _level_label[min(depth, 3)]
-                        indent_pad = "    "
 
-                        prefix = indent_pad + ("  └ " if is_last else "  ├ ")
-                        cont_prefix = indent_pad + ("    " if is_last else "  │ ")
+                        branch = "└── " if is_last else "├── "
+                        branch_cont = "    " if is_last else "│   "
 
+                        # 头行：分支 + 用户信息
                         tb.insert("end", f"\n      {base_indent}")
-                        tb.insert("end", prefix, tree_tag)
+                        tb.insert("end", branch, tree_tag)
                         tb.insert("end", f"{r_user}", _tt("reply_user", r_is_me))
                         tb.insert("end", f"  ❤ {r_likes}  ", _tt("likes", r_is_me))
                         tb.insert("end", f"{r_time}", _tt("time", r_is_me))
@@ -373,19 +382,33 @@ class App(ctk.CTk):
                         if r_is_me:
                             tb.insert("end", "  ◀", "arrow")
                         tb.insert("end", "\n")
+
+                        # 内容行
                         tb.insert("end", f"      {base_indent}")
-                        tb.insert("end", cont_prefix, tree_tag)
+                        tb.insert("end", branch_cont, tree_tag)
                         tb.insert("end", f"{r.get('text', '')}\n", _tt("reply_body", r_is_me))
 
+                        # 图片链接
                         r_images = r.get("images", [])
-                        if r_images:
-                            for img in r_images:
-                                tb.insert("end", f"      {base_indent}{cont_prefix}[图] {img}\n", _tt("image_url", r_is_me))
+                        r_stickers = r.get("stickers", [])
+                        r_media = r_images + r_stickers
+                        if r_media:
+                            idx = self._img_counter
+                            self._img_counter += 1
+                            self._img_store[idx] = r_media
+                            tag = f"img_{idx}"
+                            tb.tag_config(tag, foreground="#4FC3F7",
+                                          font=("Microsoft YaHei UI", 10, "underline"))
+                            tb.tag_bind(tag, "<Button-1>",
+                                        lambda e, i=idx: self._open_image_viewer(i))
+                            tb.insert("end", f"      {base_indent}{branch_cont}"
+                                      f"[查看图片 ({len(r_media)}张)]\n", _tt(tag, r_is_me))
 
-                        # 递归渲染更深层回复
+                        # 递归更深层
                         sub_replies = r.get("replies") or []
                         if sub_replies:
-                            _render_replies(sub_replies, depth + 1, base_indent + cont_prefix)
+                            _render_replies(sub_replies, depth + 1,
+                                            base_indent + branch_cont)
 
                 replies = c.get("replies") or []
                 _render_replies(replies, 1, "")
@@ -395,7 +418,7 @@ class App(ctk.CTk):
             tb.insert("end", "  " + "─" * 48 + "\n", "separator")
 
         # ── 底部
-        tb.insert("end", f"\n  ◆  目标用户共发 {target_total_count} 条评论，收到 {target_total_likes} 赞\n\n", "h1")
+        tb.insert("end", f"\n  ◆  目标用户共发 {target_primary} 条一级评论 + {target_secondary} 条二级回复 = {target_total_count} 条，总点赞数 {target_total_likes}\n\n", "h1")
         box.see("1.0")
         self.tab_view.set("抓取结果")
 
@@ -409,6 +432,57 @@ class App(ctk.CTk):
         if path:
             self.ids_entry.delete(0, "end")
             self.ids_entry.insert(0, path)
+
+    def _open_image_viewer(self, idx):
+        """弹出图片预览窗口"""
+        from PIL import Image
+        from io import BytesIO
+
+        urls = self._img_store.get(idx, [])
+        if not urls:
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"图片预览 — 共 {len(urls)} 张")
+        win.geometry("700x600")
+        win.after(10, win.focus)
+
+        current = [0]
+
+        img_label = ctk.CTkLabel(win, text="加载中...")
+        img_label.pack(fill="both", expand=True, padx=10, pady=(10, 5))
+
+        info_label = ctk.CTkLabel(win, text=f"第 1 / {len(urls)} 张",
+                                  font=ctk.CTkFont(size=12))
+        info_label.pack(pady=(0, 5))
+
+        def show_image(index):
+            if 0 <= index < len(urls):
+                try:
+                    resp = httpx.get(urls[index], timeout=15,
+                                    headers={"Referer": "https://www.douyin.com/"})
+                    img = Image.open(BytesIO(resp.content))
+                    w, h = img.size
+                    scale = min(650 / w, 480 / h, 1.0)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    ctk_img = ctk.CTkImage(img, size=(new_w, new_h))
+                    img_label.configure(image=ctk_img, text="")
+                    info_label.configure(text=f"第 {index + 1} / {len(urls)} 张")
+                    current[0] = index
+                except Exception as e:
+                    img_label.configure(image=None, text=f"加载失败\n{urls[index]}\n\n{e}")
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(pady=(0, 10))
+
+        ctk.CTkButton(btn_row, text="< 上一张", width=90, font=ctk.CTkFont(size=12),
+                      command=lambda: show_image(current[0] - 1)).pack(side="left", padx=3)
+        ctk.CTkButton(btn_row, text="下一张 >", width=90, font=ctk.CTkFont(size=12),
+                      command=lambda: show_image(current[0] + 1)).pack(side="left", padx=3)
+        ctk.CTkButton(btn_row, text="在浏览器打开", width=110, font=ctk.CTkFont(size=12),
+                      command=lambda: webbrowser.open(urls[current[0]])).pack(side="left", padx=3)
+
+        show_image(0)
 
     def _open_output(self):
         try:

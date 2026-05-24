@@ -93,7 +93,7 @@ class DouyinCommentCrawler:
         try:
             # 导航到视频页
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(800)
 
             final_url = page.url
             aweme_id = self._extract_aweme_id(final_url)
@@ -104,7 +104,7 @@ class DouyinCommentCrawler:
             if "/share/video/" in final_url or "iesdouyin.com" in final_url:
                 print(f"[信息] 跳转到标准视频页...")
                 page.goto(video_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(800)
 
             # 处理登录
             self._handle_login(page)
@@ -160,14 +160,14 @@ class DouyinCommentCrawler:
                     try:
                         if "/video/" in page.url:
                             print("[登录] 登录成功！")
-                            page.wait_for_timeout(2000)
+                            page.wait_for_timeout(800)
                             return
                     except Exception:
                         pass
-                    time.sleep(1)
+                    time.sleep(0.3)
                 print("[警告] 登录超时，尝试继续...")
                 return
-            time.sleep(2)
+            time.sleep(0.5)
 
     def _open_comment_panel(self, page):
         """确保评论区是打开状态"""
@@ -190,7 +190,7 @@ class DouyinCommentCrawler:
                 if el.is_visible(timeout=2000):
                     el.click()
                     print(f"[信息] 点击了 {desc}")
-                    page.wait_for_timeout(2000)
+                    page.wait_for_timeout(800)
                     break
             except Exception:
                 continue

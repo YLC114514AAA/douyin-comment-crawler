@@ -16,10 +16,10 @@ VIEWPORT_WIDTH = 1920
 VIEWPORT_HEIGHT = 1080
 
 # 滚动加载配置
-SCROLL_PAUSE_MS = 800                     # 每次滚动后等待时间（毫秒）
+SCROLL_PAUSE_MS = 200                     # 每次滚动后等待时间（毫秒）
 MAX_SCROLL_ATTEMPTS = 50                  # 最大滚动次数（安全上限）
 NO_NEW_COMMENTS_THRESHOLD = 3            # 连续N次无新评论则停止
-REPLY_REQUEST_INTERVAL = 0.3             # 二级回复请求间隔（秒）
+REPLY_REQUEST_INTERVAL = 0.1             # 二级回复请求间隔（秒）
 
 # 输出目录
 OUTPUT_DIR = "output"
