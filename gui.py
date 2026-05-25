@@ -126,6 +126,22 @@ class App(ctk.CTk):
             command=self._stop_crawl, state="disabled")
         self.stop_btn.pack(side="right")
 
+        # 提示说明
+        hint = ctk.CTkFrame(self, fg_color="transparent")
+        hint.pack(fill="x", padx=30, pady=(0, 8))
+        ctk.CTkLabel(
+            hint, text=(
+                "ℹ 快捷键：Ctrl+V 粘贴 | Ctrl+C 复制 | Ctrl+A 全选 | 右键菜单"
+            ),
+            font=ctk.CTkFont(size=10), text_color="#777777",
+        ).pack(side="left")
+        ctk.CTkLabel(
+            hint, text=(
+                "   ℹ 一级评论 = 直接回复视频的评论  |  二级评论 = 回复别人评论的回复"
+            ),
+            font=ctk.CTkFont(size=10), text_color="#666666",
+        ).pack(side="right")
+
         # 双标签页
         self.tab_view = ctk.CTkTabview(self)
         self.tab_view.pack(fill="both", expand=True, padx=30, pady=(5, 5))
@@ -190,6 +206,8 @@ class App(ctk.CTk):
 
     def _enable_paste(self, widget):
         widget.bind("<Control-v>", lambda e: self._do_paste(widget))
+        widget.bind("<Control-c>", lambda e: self._do_copy(widget))
+        widget.bind("<Control-a>", lambda e: self._do_select_all(widget))
         widget.bind("<Button-3>", lambda e: self._right_click_menu(e, widget))
 
     def _do_paste(self, widget):
@@ -197,6 +215,18 @@ class App(ctk.CTk):
             widget.insert("insert", self.clipboard_get())
         except Exception:
             pass
+
+    def _do_copy(self, widget):
+        try:
+            sel = widget.selection_get()
+            if sel:
+                self.clipboard_clear()
+                self.clipboard_append(sel)
+        except Exception:
+            pass
+
+    def _do_select_all(self, widget):
+        widget.selection_range(0, "end")
 
     def _right_click_menu(self, event, widget):
         from tkinter import Menu

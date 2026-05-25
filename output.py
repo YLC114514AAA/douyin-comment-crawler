@@ -35,26 +35,36 @@ def _make_searchable(c: dict) -> set:
 def filter_by_douyin_id(comments: list[dict], targets: list[str]) -> list[dict]:
     """
     按抖音号/UID/昵称筛选评论。大小写不敏感。
-    匹配一级评论作者 以及 二级回复作者。
+    递归匹配一级评论 + 所有深层嵌套回复。
     """
     if not targets:
         return comments
 
     target_set = {t.strip().lower() for t in targets if t.strip()}
+
+    def _collect_nested(replies: list[dict]) -> list[dict]:
+        """递归收集匹配的回复及其父路径"""
+        result = []
+        for r in replies:
+            is_match = bool(_make_searchable(r) & target_set)
+            sub = _collect_nested(r.get("replies") or [])
+            if is_match or sub:
+                r_copy = dict(r)
+                if sub:
+                    r_copy["replies"] = sub
+                result.append(r_copy)
+        return result
+
     results = []
-
     for c in comments:
-        matched = bool(_make_searchable(c) & target_set)
+        parent_matched = bool(_make_searchable(c) & target_set)
+        nested = _collect_nested(c.get("replies") or [])
 
-        # 也检查二级回复中是否有目标用户
-        replies = c.get("replies") or []
-        matched_replies = [r for r in replies if _make_searchable(r) & target_set]
-
-        if matched:
+        if parent_matched:
             results.append(c)
-        elif matched_replies:
+        elif nested:
             c_copy = dict(c)
-            c_copy["replies"] = matched_replies
+            c_copy["replies"] = nested
             results.append(c_copy)
 
     return results
